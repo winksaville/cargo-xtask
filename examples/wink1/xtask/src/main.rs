@@ -1,15 +1,21 @@
 use std::{
     env,
     path::{Path, PathBuf},
-    process::Command,
+    process::{exit, Command},
 };
 
 type DynError = Box<dyn std::error::Error>;
 
 fn main() -> Result<(), DynError> {
-    let task = env::args().nth(1);
-    match task.as_ref().map(|it| it.as_str()) {
-        Some("pre-commit") => pre_commit()?,
+    let mut env_iter = env::args();
+    let task = env_iter.nth(1);
+    let remaining_args: Vec<String> = env_iter.collect();
+    //let remaining_args: Vec<String> = env_iter.map(|a| a).collect();
+    match task.as_deref() {
+        Some("fmt") => cargo_cmd("fmt", &remaining_args)?,
+        Some("test") => cargo_cmd("test", &remaining_args)?,
+        Some("clippy") => cargo_cmd("clippy", &remaining_args)?,
+        Some("pre-commit") => pre_commit(&remaining_args)?,
         _ => print_help(),
     }
     Ok(())
@@ -18,45 +24,58 @@ fn main() -> Result<(), DynError> {
 fn print_help() {
     eprintln!(
         r#"Tasks:
-pre-commit:    Runs `cargo fmt` and `cargo test`"#
+clippy:        Runs `cargo clippy`
+fmt:           Runs `cargo fmt`
+test:          Runs `cargo test`
+pre-commit:    Runs `cargo fmt`, `cargo clippy` and `cargo test`"#
     );
 }
 
-fn pre_commit() -> Result<(), DynError> {
-    cargo_fmt()?;
-    cargo_test()?;
+fn pre_commit(remaining_args: &Vec<String>) -> Result<(), DynError> {
+    cargo_cmd_prj_root("test", remaining_args)?;
+    cargo_cmd_prj_root("clippy", remaining_args)?;
+    cargo_cmd_prj_root("fmt", remaining_args)?;
 
     Ok(())
 }
 
-fn cargo_fmt() -> Result<(), DynError> {
-    eprintln!("Run cargo fmt");
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let status = Command::new(cargo)
-        .current_dir(project_root())
-        .arg("fmt")
+fn cargo_cmd(cmd: &str, remaining_args: &Vec<String>) -> Result<(), DynError> {
+    eprintln!("Run cargo {cmd} {remaining_args:?}");
+
+    let status = Command::new(cargo_string())
+        .arg(cmd)
+        .args(remaining_args)
         .status()?;
 
     if !status.success() {
-        Err("cargo build failed")?;
+        Err("cargo {cmd} {remaining_args:?} Failed")?;
     }
-
     Ok(())
 }
 
-fn cargo_test() -> Result<(), DynError> {
-    eprintln!("Run cargo test");
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let status = Command::new(cargo)
+fn cargo_cmd_prj_root(cmd: &str, remaining_args: &Vec<String>) -> Result<(), DynError> {
+    eprintln!("Run cargo {cmd} {remaining_args:?}");
+
+    let status = Command::new(cargo_string())
         .current_dir(project_root())
-        .arg("test")
+        .arg(cmd)
+        .args(remaining_args)
         .status()?;
 
     if !status.success() {
-        Err("cargo test failed")?;
+        Err("cargo {cmd} {remaining_args:?} Failed")?;
     }
-
     Ok(())
+}
+
+fn cargo_string() -> String {
+    match env::var("CARGO") {
+        Ok(cs) => cs,
+        Err(_) => {
+            eprintln!("No CARGO environment variable, is cargo installed?");
+            exit(2);
+        }
+    }
 }
 
 fn project_root() -> PathBuf {
